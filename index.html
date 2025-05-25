@@ -39,12 +39,27 @@
         const saved = localStorage.getItem('counter-inventory-data');
         if (saved) {
           try {
-            return JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            // 确保历史数据结构存在，且将其中的销售数据转换为数组
+            if (!parsed.history) {
+              parsed.history = {};
+            } else {
+              // 兼容旧数据格式：如果历史记录是直接的对象，转换为数组
+              for (const date in parsed.history) {
+                if (!Array.isArray(parsed.history[date])) {
+                  parsed.history[date] = [{
+                    sales: parsed.history[date],
+                    timestamp: new Date(date).toISOString() // 假设是当天0点的时间戳
+                  }];
+                }
+              }
+            }
+            return parsed;
           } catch (e) {
             console.warn("读取缓存失败，使用默认初始值");
           }
         }
-        const data = { sales: {}, inventory: {} };
+        const data = { sales: {}, inventory: {}, history: {} }; // history 现在将存储日期到数组的映射
         Object.keys(productCategories).forEach(category => {
           data.sales[category] = {};
           data.inventory[category] = {};
@@ -58,7 +73,7 @@
 
       const [data, setData] = useState(initializeData);
       const [currentCategory, setCurrentCategory] = useState(null);
-      const [currentView, setCurrentView] = useState('main'); // 'main', 'summary', 'inventory', 'sales'
+      const [currentView, setCurrentView] = useState('main'); // 'main', 'summary', 'inventory', 'sales', 'history'
       const [showInventoryInput, setShowInventoryInput] = useState(false);
       const [tempInventory, setTempInventory] = useState({});
 
@@ -73,7 +88,7 @@
             alert('库存不足，无法销售！');
             return prev;
           }
-          
+
           const updated = {
             ...prev,
             sales: {
@@ -99,7 +114,7 @@
       const decrementSales = (category, pattern) => {
         setData(prev => {
           if (prev.sales[category][pattern] <= 0) return prev;
-          
+
           const updated = {
             ...prev,
             sales: {
@@ -141,13 +156,26 @@
       };
 
       const endMarketDay = () => {
-        if (confirm('确定要收摊吗？\n收摊后销量清零，库存保留。')) {
+        if (confirm('确定要收摊吗？\n收摊后销量清零，库存保留，并记录今日销量数据。')) {
           setData(prev => {
+            const today = new Date().toISOString().slice(0, 10); // 获取YYYY-MM-DD 格式的日期
+            const now = new Date().toISOString(); // 获取完整的时间戳
+
+            // 深拷贝当前的销售数据
+            const salesSnapshot = JSON.parse(JSON.stringify(prev.sales));
+
+            const updatedHistoryForToday = prev.history[today] ? [...prev.history[today]] : [];
+            updatedHistoryForToday.push({ sales: salesSnapshot, timestamp: now }); // 添加新的记录
+
             const updated = {
               ...prev,
-              sales: {}
+              sales: {}, // 清零当前销量
+              history: {
+                ...prev.history,
+                [today]: updatedHistoryForToday // 保存今日销售快照数组
+              }
             };
-            // 重置所有销量为0，保留库存
+            // 重置所有销量为0
             Object.keys(productCategories).forEach(category => {
               updated.sales[category] = {};
               productCategories[category].forEach(pattern => {
@@ -155,6 +183,7 @@
               });
             });
             saveData(updated);
+            setCurrentView('main'); // 收摊后返回主页面
             return updated;
           });
         }
@@ -191,23 +220,69 @@
       };
 
       const exportToCSV = () => {
-        let csvContent = '品类,款式,销量,库存,总量\n';
+        let csvContent = '';
+
+        // 添加当前库存和销售数据
+        csvContent += '当前销售和库存数据\n';
+        csvContent += '品类,款式,当前销量,当前库存,总计\n';
         Object.keys(data.sales).forEach(category => {
           productCategories[category].forEach(pattern => {
             const sales = data.sales[category][pattern];
             const inventory = data.inventory[category][pattern];
             const total = sales + inventory;
-            if (sales > 0 || inventory > 0) {
-              csvContent += `${category},${pattern},${sales},${inventory},${total}\n`;
-            }
+            csvContent += `${category},${pattern},${sales},${inventory},${total}\n`;
           });
+        });
+        csvContent += '\n\n'; // 分隔符
+
+        // 新增辅助函数：计算某一天的总销售数据 (汇总所有快照)
+        const getDailyTotalSalesForExport = (date) => {
+          const dailySummary = {};
+          const snapshots = data.history[date];
+
+          if (snapshots) {
+            snapshots.forEach(snapshot => {
+              Object.keys(snapshot.sales).forEach(category => {
+                if (!dailySummary[category]) {
+                  dailySummary[category] = {};
+                }
+                Object.keys(snapshot.sales[category]).forEach(pattern => {
+                  const salesCount = snapshot.sales[category][pattern] || 0;
+                  dailySummary[category][pattern] = (dailySummary[category][pattern] || 0) + salesCount;
+                });
+              });
+            });
+          }
+          return dailySummary;
+        };
+
+
+        // 添加历史销售数据 (修改这部分)
+        csvContent += '集市历史销售数据 (按天汇总)\n'; // 标题修改
+        const sortedDates = Object.keys(data.history).sort((a, b) => b.localeCompare(a)); // 按日期倒序排列
+        sortedDates.forEach(date => {
+          const dailyTotalSales = getDailyTotalSalesForExport(date); // 获取当天的汇总数据
+
+          csvContent += `日期:,${date},,,\n`; // 写入日期行
+          csvContent += '品类,款式,销量\n'; // 历史记录只有销量
+
+          Object.keys(productCategories).forEach(category => {
+            productCategories[category].forEach(pattern => {
+              // 从汇总数据中获取销量
+              const sales = dailyTotalSales[category]?.[pattern] || 0;
+              if (sales > 0) { // 只导出有销量的历史数据
+                csvContent += `${category},${pattern},${sales}\n`;
+              }
+            });
+          });
+          csvContent += '\n'; // 每日期之间留一行
         });
 
         const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = '市场统计数据.csv';
+        link.download = '集市统计完整报告.csv';
         link.click();
       };
 
@@ -245,7 +320,7 @@
                 <h1 className="text-2xl font-bold text-center text-gray-800 mb-1">🎨 THIS THAT STUDIO 市集统计</h1>
                 <div className="text-center text-gray-500 text-sm mb-1">大馋小子开发</div>
                 <div className="text-center text-gray-400 text-xs mb-4">聪明蛋子❤大馋小子</div>
-                
+
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div className="text-center bg-blue-50 p-3 rounded-lg">
                     <div className="text-2xl font-bold text-blue-600">{getTotalSales()}</div>
@@ -256,13 +331,16 @@
                     <div className="text-gray-600 text-sm">总库存</div>
                   </div>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-2">
                   <button onClick={() => setCurrentView('summary')} className="touch-button flex items-center justify-center gap-1 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
                     📊 统计
                   </button>
                   <button onClick={() => setCurrentView('inventory')} className="touch-button flex items-center justify-center gap-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
                     📦 库存
+                  </button>
+                  <button onClick={() => setCurrentView('history')} className="touch-button flex items-center justify-center gap-1 bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors">
+                    📅 历史
                   </button>
                   <button onClick={exportToCSV} className="touch-button flex items-center justify-center gap-1 text-black px-4 py-2 rounded-lg transition-colors" style={{ backgroundColor: '#f0daa5' }}>
                     📤 导出
@@ -272,7 +350,7 @@
                   </button>
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-1 gap-3">
                 {Object.keys(productCategories).map(category => (
                   <button key={category} onClick={() => { setCurrentCategory(category); setCurrentView('sales'); }} className="touch-button text-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105 active:scale-95" style={{ backgroundColor: categoryColors[category].bg, color: categoryColors[category].text }}>
@@ -376,6 +454,97 @@
         );
       }
 
+      // 历史记录页面
+      if (currentView === 'history') {
+        const sortedDates = Object.keys(data.history).sort((a, b) => b.localeCompare(a)); // 按日期倒序排列
+
+        const getSnapshotTotalSales = (snapshot) => { // 计算单次快照的总销量
+            let total = 0;
+            if (snapshot && snapshot.sales) {
+                Object.values(snapshot.sales).forEach(categorySales => {
+                    Object.values(categorySales).forEach(count => {
+                        total += count;
+                    });
+                });
+            }
+            return total;
+        };
+
+        return (
+          <div className="min-h-screen bg-gray-50 p-4">
+            <div className="max-w-md mx-auto">
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <button onClick={() => setCurrentView('main')} className="touch-button p-2 hover:bg-gray-100 rounded-full transition-colors">← 返回</button>
+                  <h2 className="text-xl font-bold">📅 集市历史回顾</h2>
+                  {sortedDates.length > 0 && (
+                    <button
+                        onClick={() => {
+                            if (confirm('确定要清空所有历史销售数据吗？此操作不可撤销！')) {
+                                setData(prev => {
+                                    const updated = { ...prev, history: {} };
+                                    saveData(updated);
+                                    return updated;
+                                });
+                            }
+                        }}
+                        className="touch-button bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 transition-colors ml-auto text-sm"
+                    >
+                        清空历史
+                    </button>
+                  )}
+                </div>
+
+                {sortedDates.length === 0 ? (
+                  <p className="text-center text-gray-500">暂无历史销售数据。</p>
+                ) : (
+                  <div className="space-y-4">
+                    {sortedDates.map(date => (
+                      <div key={date} className="border rounded-lg p-4">
+                        <div className="font-bold text-lg text-gray-800 mb-2">{date}</div>
+                        <div className="space-y-3">
+                            {data.history[date].map((snapshot, index) => (
+                                <div key={index} className="border-t border-gray-100 pt-3 first:border-t-0 first:pt-0">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <span className="font-semibold text-gray-700">记录 {index + 1} ({new Date(snapshot.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })})</span>
+                                        <span className="font-bold text-blue-600">销量: {getSnapshotTotalSales(snapshot)}</span>
+                                    </div>
+                                    <div className="ml-4 space-y-1">
+                                        {Object.keys(productCategories).map(category => {
+                                            const categorySales = snapshot.sales[category];
+                                            const categoryTotal = Object.values(categorySales || {}).reduce((sum, count) => sum + count, 0);
+                                            if (categoryTotal > 0) {
+                                                return (
+                                                    <div key={category} className="mb-2">
+                                                        <span className="px-2 py-0.5 text-xs rounded-full" style={{ backgroundColor: categoryColors[category]?.bg, color: categoryColors[category]?.text }}>{category}</span>
+                                                        <span className="ml-2 text-sm text-gray-700">销量: {categoryTotal}</span>
+                                                        <div className="ml-4 text-xs text-gray-600 space-y-0.5">
+                                                            {Object.entries(categorySales || {}).filter(([_, count]) => count > 0).map(([pattern, count]) => (
+                                                                <div key={pattern} className="flex justify-between">
+                                                                    <span>{pattern}</span>
+                                                                    <span>{count}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            }
+                                            return null;
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       // 销售计数页面
       if (currentView === 'sales') {
         if (showInventoryInput) {
@@ -435,7 +604,7 @@
                   const sales = data.sales[currentCategory][pattern];
                   const inventory = data.inventory[currentCategory][pattern];
                   const isOutOfStock = inventory <= 0;
-                  
+
                   return (
                     <div key={pattern} className={`bg-white rounded-lg shadow-md p-4 ${isOutOfStock ? 'bg-red-50 border border-red-200' : ''}`}>
                       <div className="flex items-center justify-between mb-2">
