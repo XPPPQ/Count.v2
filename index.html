@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>THIS THAT STUDIO 市集统计</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .touch-button {
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    const ArtMarketCounter = () => {
+      const productCategories = {
+        '大手提包': ['长毛狗', '小乖狗', '迎风小狗', '三角帽小狗', '蝴蝶兔', '兔头', '熊头', '长面包', '黑狗头', '哈巴狗'],
+        '小号斜挎包': ['三角帽小狗', '小乖狗', '兔头', '狗头'],
+        '大号斜挎包': ['三角帽小狗', '兔头', '小乖狗', '哈巴狗'],
+        '拉链小包': ['兔头', '狗头', '熊头', '四头面包', '三角帽小狗', '蝴蝶结兔', '迎风小狗', '三头面包', '小乖狗', '垂耳兔头', '猫头', '三头圆眼睛面包', '小胖兔头', '四头刘海面包', '眉毛小狗生气', '红领巾小狗', '睡着小狗'],
+        '杯垫': ['三角帽小狗', '小乖狗', '三头面包', '四头面包', '熊头', '狗头', '蝴蝶结兔', '迎风小狗', '兔头', '垂耳兔头', '小胖兔头', '四头刘海面包', '猫头', '三头圆眼睛面包', '蜡染杯垫'],
+        '餐垫': ['小乖狗', '三角帽小狗'],
+        '扇子': ['三角帽小狗', '眉毛小狗']
+      };
+
+      const initializeData = () => {
+        const saved = localStorage.getItem('counter-inventory-data');
+        if (saved) {
+          try {
+            return JSON.parse(saved);
+          } catch (e) {
+            console.warn("读取缓存失败，使用默认初始值");
+          }
+        }
+        const data = { sales: {}, inventory: {} };
+        Object.keys(productCategories).forEach(category => {
+          data.sales[category] = {};
+          data.inventory[category] = {};
+          productCategories[category].forEach(pattern => {
+            data.sales[category][pattern] = 0;
+            data.inventory[category][pattern] = 0;
+          });
+        });
+        return data;
+      };
+
+      const [data, setData] = useState(initializeData);
+      const [currentCategory, setCurrentCategory] = useState(null);
+      const [currentView, setCurrentView] = useState('main'); // 'main', 'summary', 'inventory', 'sales'
+      const [showInventoryInput, setShowInventoryInput] = useState(false);
+      const [tempInventory, setTempInventory] = useState({});
+
+      const saveData = (newData) => {
+        localStorage.setItem('counter-inventory-data', JSON.stringify(newData));
+      };
+
+      const incrementSales = (category, pattern) => {
+        setData(prev => {
+          const currentInventory = prev.inventory[category][pattern];
+          if (currentInventory <= 0) {
+            alert('库存不足，无法销售！');
+            return prev;
+          }
+          
+          const updated = {
+            ...prev,
+            sales: {
+              ...prev.sales,
+              [category]: {
+                ...prev.sales[category],
+                [pattern]: prev.sales[category][pattern] + 1
+              }
+            },
+            inventory: {
+              ...prev.inventory,
+              [category]: {
+                ...prev.inventory[category],
+                [pattern]: currentInventory - 1
+              }
+            }
+          };
+          saveData(updated);
+          return updated;
+        });
+      };
+
+      const decrementSales = (category, pattern) => {
+        setData(prev => {
+          if (prev.sales[category][pattern] <= 0) return prev;
+          
+          const updated = {
+            ...prev,
+            sales: {
+              ...prev.sales,
+              [category]: {
+                ...prev.sales[category],
+                [pattern]: prev.sales[category][pattern] - 1
+              }
+            },
+            inventory: {
+              ...prev.inventory,
+              [category]: {
+                ...prev.inventory[category],
+                [pattern]: prev.inventory[category][pattern] + 1
+              }
+            }
+          };
+          saveData(updated);
+          return updated;
+        });
+      };
+
+      const updateInventory = (category, pattern, value) => {
+        const numValue = Math.max(0, parseInt(value) || 0);
+        setData(prev => {
+          const updated = {
+            ...prev,
+            inventory: {
+              ...prev.inventory,
+              [category]: {
+                ...prev.inventory[category],
+                [pattern]: numValue
+              }
+            }
+          };
+          saveData(updated);
+          return updated;
+        });
+      };
+
+      const endMarketDay = () => {
+        if (confirm('确定要收摊吗？\n收摊后销量清零，库存保留。')) {
+          setData(prev => {
+            const updated = {
+              ...prev,
+              sales: {}
+            };
+            // 重置所有销量为0，保留库存
+            Object.keys(productCategories).forEach(category => {
+              updated.sales[category] = {};
+              productCategories[category].forEach(pattern => {
+                updated.sales[category][pattern] = 0;
+              });
+            });
+            saveData(updated);
+            return updated;
+          });
+        }
+      };
+
+      const getCategorySales = (category) => {
+        return Object.values(data.sales[category]).reduce((sum, count) => sum + count, 0);
+      };
+
+      const getCategoryInventory = (category) => {
+        return Object.values(data.inventory[category]).reduce((sum, count) => sum + count, 0);
+      };
+
+      const getTotalSales = () => {
+        return Object.keys(data.sales).reduce((total, category) => {
+          return total + getCategorySales(category);
+        }, 0);
+      };
+
+      const getTotalInventory = () => {
+        return Object.keys(data.inventory).reduce((total, category) => {
+          return total + getCategoryInventory(category);
+        }, 0);
+      };
+
+      const categoryColors = {
+        '大手提包': { bg: '#c7522a', text: 'white' },
+        '小号斜挎包': { bg: '#d68a58', text: 'white' },
+        '大号斜挎包': { bg: '#e5c185', text: 'black' },
+        '拉链小包': { bg: '#96bb9f', text: 'white' },
+        '杯垫': { bg: '#74a892', text: 'white' },
+        '餐垫': { bg: '#3a978c', text: 'white' },
+        '扇子': { bg: '#008585', text: 'white' }
+      };
+
+      const exportToCSV = () => {
+        let csvContent = '品类,款式,销量,库存,总量\n';
+        Object.keys(data.sales).forEach(category => {
+          productCategories[category].forEach(pattern => {
+            const sales = data.sales[category][pattern];
+            const inventory = data.inventory[category][pattern];
+            const total = sales + inventory;
+            if (sales > 0 || inventory > 0) {
+              csvContent += `${category},${pattern},${sales},${inventory},${total}\n`;
+            }
+          });
+        });
+
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = '市场统计数据.csv';
+        link.click();
+      };
+
+      const prepareBatchInventoryInput = (category) => {
+        const temp = {};
+        productCategories[category].forEach(pattern => {
+          temp[pattern] = data.inventory[category][pattern];
+        });
+        setTempInventory(temp);
+        setShowInventoryInput(true);
+      };
+
+      const saveBatchInventory = () => {
+        setData(prev => {
+          const updated = {
+            ...prev,
+            inventory: {
+              ...prev.inventory,
+              [currentCategory]: { ...tempInventory }
+            }
+          };
+          saveData(updated);
+          return updated;
+        });
+        setShowInventoryInput(false);
+        setTempInventory({});
+      };
+
+      // 主页面
+      if (currentView === 'main') {
+        return (
+          <div className="min-h-screen bg-gray-50 p-4">
+            <div className="max-w-md mx-auto">
+              <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
+                <h1 className="text-2xl font-bold text-center text-gray-800 mb-1">🎨 THIS THAT STUDIO 市集统计</h1>
+                <div className="text-center text-gray-500 text-sm mb-1">大馋小子开发</div>
+                <div className="text-center text-gray-400 text-xs mb-4">聪明蛋子❤大馋小子</div>
+                
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="text-center bg-blue-50 p-3 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600">{getTotalSales()}</div>
+                    <div className="text-gray-600 text-sm">总销量</div>
+                  </div>
+                  <div className="text-center bg-green-50 p-3 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600">{getTotalInventory()}</div>
+                    <div className="text-gray-600 text-sm">总库存</div>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => setCurrentView('summary')} className="touch-button flex items-center justify-center gap-1 bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition-colors">
+                    📊 统计
+                  </button>
+                  <button onClick={() => setCurrentView('inventory')} className="touch-button flex items-center justify-center gap-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+                    📦 库存
+                  </button>
+                  <button onClick={exportToCSV} className="touch-button flex items-center justify-center gap-1 text-black px-4 py-2 rounded-lg transition-colors" style={{ backgroundColor: '#f0daa5' }}>
+                    📤 导出
+                  </button>
+                  <button onClick={endMarketDay} className="touch-button flex items-center justify-center gap-1 bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors">
+                    🏪 收摊
+                  </button>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 gap-3">
+                {Object.keys(productCategories).map(category => (
+                  <button key={category} onClick={() => { setCurrentCategory(category); setCurrentView('sales'); }} className="touch-button text-white p-4 rounded-lg shadow-md hover:shadow-lg transition-all transform hover:scale-105 active:scale-95" style={{ backgroundColor: categoryColors[category].bg, color: categoryColors[category].text }}>
+                    <div className="text-lg font-bold">{category}</div>
+                    <div className="text-sm opacity-90 flex justify-between">
+                      <span>销量: {getCategorySales(category)}</span>
+                      <span>库存: {getCategoryInventory(category)}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // 统计页面
+      if (currentView === 'summary') {
+        return (
+          <div className="min-h-screen bg-gray-50 p-4">
+            <div className="max-w-md mx-auto">
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <button onClick={() => setCurrentView('main')} className="touch-button p-2 hover:bg-gray-100 rounded-full transition-colors">← 返回</button>
+                  <h2 className="text-xl font-bold">📊 销售统计</h2>
+                </div>
+                <div className="mb-6 text-center">
+                  <div className="text-3xl font-bold text-blue-600">{getTotalSales()}</div>
+                  <div className="text-gray-600">总销量</div>
+                </div>
+                <div className="space-y-4">
+                  {Object.keys(productCategories).map(category => {
+                    const total = getCategorySales(category);
+                    return (
+                      <div key={category} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="px-3 py-1 text-sm rounded-full" style={{ backgroundColor: categoryColors[category].bg, color: categoryColors[category].text }}>{category}</span>
+                          <span className="font-bold text-lg">{total}</span>
+                        </div>
+                        {total > 0 && (
+                          <div className="ml-4 space-y-1">
+                            {Object.entries(data.sales[category]).filter(([_, count]) => count > 0).map(([pattern, count]) => (
+                              <div key={pattern} className="flex justify-between text-sm text-gray-600">
+                                <span>{pattern}</span><span>{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // 库存管理页面
+      if (currentView === 'inventory') {
+        return (
+          <div className="min-h-screen bg-gray-50 p-4">
+            <div className="max-w-md mx-auto">
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center gap-3 mb-6">
+                  <button onClick={() => setCurrentView('main')} className="touch-button p-2 hover:bg-gray-100 rounded-full transition-colors">← 返回</button>
+                  <h2 className="text-xl font-bold">📦 库存管理</h2>
+                </div>
+                <div className="mb-6 text-center">
+                  <div className="text-3xl font-bold text-green-600">{getTotalInventory()}</div>
+                  <div className="text-gray-600">总库存</div>
+                </div>
+                <div className="space-y-4">
+                  {Object.keys(productCategories).map(category => {
+                    const total = getCategoryInventory(category);
+                    return (
+                      <div key={category} className="border rounded-lg p-4">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="px-3 py-1 text-sm rounded-full" style={{ backgroundColor: categoryColors[category].bg, color: categoryColors[category].text }}>{category}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-lg">{total}</span>
+                            <button onClick={() => { setCurrentCategory(category); prepareBatchInventoryInput(category); }} className="touch-button bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded text-xs">编辑</button>
+                          </div>
+                        </div>
+                        {total > 0 && (
+                          <div className="ml-4 space-y-1">
+                            {Object.entries(data.inventory[category]).filter(([_, count]) => count > 0).map(([pattern, count]) => (
+                              <div key={pattern} className="flex justify-between text-sm text-gray-600">
+                                <span>{pattern}</span><span>{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // 销售计数页面
+      if (currentView === 'sales') {
+        if (showInventoryInput) {
+          return (
+            <div className="min-h-screen bg-gray-50 p-4">
+              <div className="max-w-md mx-auto">
+                <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+                  <div className="flex items-center gap-3 mb-4">
+                    <button onClick={() => setShowInventoryInput(false)} className="touch-button p-2 hover:bg-gray-100 rounded-full transition-colors">← 返回</button>
+                    <div>
+                      <h2 className="text-lg font-bold">设置库存 - {currentCategory}</h2>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  {productCategories[currentCategory].map(pattern => (
+                    <div key={pattern} className="bg-white rounded-lg shadow-md p-4 flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-gray-800">{pattern}</div>
+                        <div className="text-sm text-gray-500">当前: {data.inventory[currentCategory][pattern]}</div>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        value={tempInventory[pattern] || ''}
+                        onChange={(e) => setTempInventory(prev => ({ ...prev, [pattern]: parseInt(e.target.value) || 0 }))}
+                        className="w-20 p-2 border rounded text-center"
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                  <div className="flex gap-2 mt-6">
+                    <button onClick={() => setShowInventoryInput(false)} className="touch-button flex-1 bg-gray-500 text-white py-3 rounded-lg hover:bg-gray-600 transition-colors">取消</button>
+                    <button onClick={saveBatchInventory} className="touch-button flex-1 bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 transition-colors">保存</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="min-h-screen bg-gray-50 p-4">
+            <div className="max-w-md mx-auto">
+              <div className="bg-white rounded-lg shadow-lg p-4 mb-4">
+                <div className="flex items-center gap-3 mb-4">
+                  <button onClick={() => setCurrentView('main')} className="touch-button p-2 hover:bg-gray-100 rounded-full transition-colors">← 返回</button>
+                  <div className="flex-1">
+                    <h2 className="text-lg font-bold">{currentCategory}</h2>
+                    <p className="text-sm text-gray-600">销量：{getCategorySales(currentCategory)} | 库存：{getCategoryInventory(currentCategory)}</p>
+                  </div>
+                  <button onClick={() => prepareBatchInventoryInput(currentCategory)} className="touch-button bg-blue-100 hover:bg-blue-200 px-3 py-1 rounded text-sm text-blue-700">📦 库存</button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                {productCategories[currentCategory].map(pattern => {
+                  const sales = data.sales[currentCategory][pattern];
+                  const inventory = data.inventory[currentCategory][pattern];
+                  const isOutOfStock = inventory <= 0;
+                  
+                  return (
+                    <div key={pattern} className={`bg-white rounded-lg shadow-md p-4 ${isOutOfStock ? 'bg-red-50 border border-red-200' : ''}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex-1">
+                          <div className="font-medium text-gray-800">{pattern}</div>
+                          <div className="text-sm text-gray-500">库存: {inventory} {isOutOfStock && <span className="text-red-500 font-bold">（缺货）</span>}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="text-sm text-gray-600">销量:</div>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => decrementSales(currentCategory, pattern)} className="touch-button w-10 h-10 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors active:scale-95 text-lg font-bold flex items-center justify-center" disabled={sales === 0}>-</button>
+                          <div className="w-12 text-center">
+                            <span className="text-xl font-bold text-blue-600">{sales}</span>
+                          </div>
+                          <button onClick={() => incrementSales(currentCategory, pattern)} className={`touch-button w-10 h-10 text-white rounded-full transition-colors active:scale-95 text-lg font-bold flex items-center justify-center ${isOutOfStock ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600'}`} disabled={isOutOfStock}>+</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-6 text-center text-gray-500 text-sm">💡 点击 + 号销售，点击 - 号退货<br/>📦 缺货商品无法销售</div>
+            </div>
+          </div>
+        );
+      }
+    };
+
+    ReactDOM.render(<ArtMarketCounter />, document.getElementById('root'));
+  </script>
+</body>
+</html>
